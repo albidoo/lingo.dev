@@ -1,449 +1,52 @@
+/**
+ * Cover Image API
+ *
+ * A production-ready API for generating beautiful, customizable cover images
+ * with multi-language support and advanced layout options.
+ *
+ * Main features:
+ * - 10 layout options (center, corners, sides, split)
+ * - Light/dark themes with custom colors
+ * - Multi-language translation via Lingo.dev
+ * - Automatic font sizing and text wrapping
+ * - Built-in caching and rate limiting
+ */
+
 import express from "express";
-import { LingoDotDevEngine } from "lingo.dev/sdk";
 import cors from "cors";
 import compression from "compression";
 import "dotenv/config";
 
+// Import services and utilities
+import { TranslationService } from "../services/translation.js";
+import { SvgGenerator } from "../services/svg-generator.js";
+import { CacheManager } from "../utils/cache.js";
+import { RateLimiter } from "../utils/rate-limiter.js";
+import { validateParams } from "../utils/validation.js";
+import { LAYOUTS } from "../config/constants.js";
+
+// Initialize Express app
 const app = express();
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
-// Middleware
+// Configure middleware
 app.use(cors());
 app.use(compression());
 app.use(express.json());
 
-// Initialize the translation engine
-const lingo = new LingoDotDevEngine({
-  apiKey: process.env.LINGODOTDEV_API_KEY,
-});
-
-// In-memory cache
-const cache = new Map();
-const MAX_CACHE_SIZE = 1000;
-
-// Rate limiting tracking (simple in-memory, use Redis in production)
-const requestCounts = new Map();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 100; // 100 requests per minute
-
-/**
- * Simple rate limiter
- */
-function checkRateLimit(ip) {
-  const now = Date.now();
-  const userRequests = requestCounts.get(ip) || [];
-
-  // Filter out old requests
-  const recentRequests = userRequests.filter(
-    (time) => now - time < RATE_LIMIT_WINDOW,
-  );
-
-  if (recentRequests.length >= RATE_LIMIT_MAX) {
-    return false;
-  }
-
-  recentRequests.push(now);
-  requestCounts.set(ip, recentRequests);
-  return true;
-}
-
-/**
- * Generates a cache key from all parameters
- */
-function generateCacheKey(params) {
-  return JSON.stringify(params);
-}
-
-/**
- * Manages cache size
- */
-function addToCache(key, value) {
-  if (cache.size >= MAX_CACHE_SIZE) {
-    // Remove oldest entry
-    const firstKey = cache.keys().next().value;
-    cache.delete(firstKey);
-  }
-  cache.set(key, value);
-}
-
-/**
- * Escapes XML entities to safely embed text in SVG
- */
-function escapeXml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-/**
- * Validates hex color
- */
-function isValidHexColor(color) {
-  return /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(color);
-}
-
-/**
- * Translates text using lingo.dev SDK
- */
-async function translateText(text, targetLang = "en") {
-  // Basic validation
-  if (!text || typeof text !== "string") return "";
-  if (!targetLang || targetLang === "en") return text;
-
-  try {
-    const result = await lingo.localizeText(text, {
-      sourceLocale: "en",
-      targetLocale: targetLang,
-      fast: true, // optional (see below)
-    });
-
-    return result || text;
-  } catch (error) {
-    console.error(`Translation failed [${targetLang}]`, error);
-    return text; // graceful fallback
-  }
-}
-
-/**
- * Wraps text into multiple lines based on max width
- */
-function wrapText(text, maxCharsPerLine = 40) {
-  const words = text.split(" ");
-  const lines = [];
-  let currentLine = "";
-
-  for (const word of words) {
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-    if (testLine.length <= maxCharsPerLine) {
-      currentLine = testLine;
-    } else {
-      if (currentLine) lines.push(currentLine);
-      currentLine = word;
-    }
-  }
-  if (currentLine) lines.push(currentLine);
-
-  return lines;
-}
-
-/**
- * Generates SVG text elements with proper positioning
- */
-function generateTextElements(config) {
-  const {
-    text,
-    subtitle,
-    x,
-    y,
-    fontSize,
-    fontWeight,
-    textAnchor,
-    fill,
-    fontFamily,
-    maxWidth,
-    lineHeight = 1.3,
-  } = config;
-
-  const lines = wrapText(text, Math.floor(maxWidth / (fontSize * 0.6)));
-  const totalHeight = lines.length * fontSize * lineHeight;
-  const startY = y - totalHeight / 2 + fontSize / 2;
-
-  let svgText = "";
-
-  // Main text lines
-  lines.forEach((line, index) => {
-    const lineY = startY + index * fontSize * lineHeight;
-    svgText += `
-  <text
-    x="${x}"
-    y="${lineY}"
-    font-family="${fontFamily}"
-    font-size="${fontSize}"
-    font-weight="${fontWeight}"
-    text-anchor="${textAnchor}"
-    fill="${fill}"
-  >${escapeXml(line)}</text>`;
-  });
-
-  // Subtitle
-  if (subtitle) {
-    const subtitleY =
-      startY + lines.length * fontSize * lineHeight + fontSize * 0.8;
-    const subtitleFontSize = fontSize * 0.5;
-    svgText += `
-  <text
-    x="${x}"
-    y="${subtitleY}"
-    font-family="${fontFamily}"
-    font-size="${subtitleFontSize}"
-    font-weight="400"
-    text-anchor="${textAnchor}"
-    fill="${fill}"
-    opacity="0.7"
-  >${escapeXml(subtitle)}</text>`;
-  }
-
-  return svgText;
-}
-
-/**
- * Layout configurations
- */
-const LAYOUTS = {
-  center: {
-    getPosition: (width, height) => ({
-      x: width / 2,
-      y: height / 2,
-      textAnchor: "middle",
-      maxWidth: width * 0.8,
-    }),
-  },
-  top: {
-    getPosition: (width, height, padding) => ({
-      x: width / 2,
-      y: padding + 100,
-      textAnchor: "middle",
-      maxWidth: width * 0.8,
-    }),
-  },
-  bottom: {
-    getPosition: (width, height, padding) => ({
-      x: width / 2,
-      y: height - padding - 100,
-      textAnchor: "middle",
-      maxWidth: width * 0.8,
-    }),
-  },
-  left: {
-    getPosition: (width, height, padding) => ({
-      x: padding + 80,
-      y: height / 2,
-      textAnchor: "start",
-      maxWidth: width * 0.6,
-    }),
-  },
-  right: {
-    getPosition: (width, height, padding) => ({
-      x: width - padding - 80,
-      y: height / 2,
-      textAnchor: "end",
-      maxWidth: width * 0.6,
-    }),
-  },
-  "top-left": {
-    getPosition: (width, height, padding) => ({
-      x: padding + 80,
-      y: padding + 100,
-      textAnchor: "start",
-      maxWidth: width * 0.6,
-    }),
-  },
-  "top-right": {
-    getPosition: (width, height, padding) => ({
-      x: width - padding - 80,
-      y: padding + 100,
-      textAnchor: "end",
-      maxWidth: width * 0.6,
-    }),
-  },
-  "bottom-left": {
-    getPosition: (width, height, padding) => ({
-      x: padding + 80,
-      y: height - padding - 100,
-      textAnchor: "start",
-      maxWidth: width * 0.6,
-    }),
-  },
-  "bottom-right": {
-    getPosition: (width, height, padding) => ({
-      x: width - padding - 80,
-      y: height - padding - 100,
-      textAnchor: "end",
-      maxWidth: width * 0.6,
-    }),
-  },
-  split: {
-    getPosition: (width, height) => ({
-      x: width / 2,
-      y: height / 2,
-      textAnchor: "middle",
-      maxWidth: width * 0.45,
-      withDivider: true,
-    }),
-  },
-};
-
-/**
- * Generates an advanced SVG cover image
- */
-function generateSvgCover(options) {
-  const {
-    text,
-    subtitle = "",
-    width = 1200,
-    height = 630,
-    bgColor = "#FFFFFF",
-    textColor = "#000000",
-    fontSize: customFontSize,
-    fontWeight = "600",
-    layout = "center",
-    padding = 60,
-    fontFamily = "system-ui, -apple-system, 'Segoe UI', sans-serif",
-  } = options;
-
-  // Auto font sizing based on text length if not specified
-  let fontSize = customFontSize;
-  if (!fontSize) {
-    if (text.length > 80) {
-      fontSize = 36;
-    } else if (text.length > 50) {
-      fontSize = 44;
-    } else {
-      fontSize = 56;
-    }
-  }
-
-  const layoutConfig = LAYOUTS[layout] || LAYOUTS.center;
-  const position = layoutConfig.getPosition(width, height, padding);
-
-  let decorativeElements = "";
-
-  // Add divider for split layout
-  if (position.withDivider) {
-    decorativeElements = `
-  <line
-    x1="${width / 2}"
-    y1="${padding}"
-    x2="${width / 2}"
-    y2="${height - padding}"
-    stroke="${textColor}"
-    stroke-width="2"
-    opacity="0.2"
-  />`;
-  }
-
-  const textElements = generateTextElements({
-    text,
-    subtitle,
-    x: position.x,
-    y: position.y,
-    fontSize,
-    fontWeight,
-    textAnchor: position.textAnchor,
-    fill: textColor,
-    fontFamily,
-    maxWidth: position.maxWidth,
-  });
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background -->
-  <rect width="${width}" height="${height}" fill="${bgColor}"/>
-  ${decorativeElements}
-  <!-- Text -->
-  ${textElements}
-</svg>`;
-}
-
-/**
- * Validates and sanitizes input parameters
- */
-function validateParams(query) {
-  const errors = [];
-  const params = {};
-
-  // Required: text
-  if (
-    !query.text ||
-    typeof query.text !== "string" ||
-    query.text.trim() === ""
-  ) {
-    errors.push('Missing or invalid "text" parameter');
-  } else {
-    params.text = query.text.trim();
-  }
-
-  // Optional: subtitle
-  if (query.subtitle && typeof query.subtitle === "string") {
-    params.subtitle = query.subtitle.trim();
-  }
-
-  // Optional: language
-  params.lang = query.lang || "en";
-
-  // Optional: theme or custom colors
-  if (query.theme === "dark") {
-    params.bgColor = "#000000";
-    params.textColor = "#FFFFFF";
-  } else {
-    params.bgColor = "#FFFFFF";
-    params.textColor = "#000000";
-  }
-
-  // Custom colors override theme
-  if (query.bgColor) {
-    if (isValidHexColor(query.bgColor)) {
-      params.bgColor = query.bgColor;
-    } else {
-      errors.push("Invalid bgColor format (use hex: #000000)");
-    }
-  }
-
-  if (query.textColor) {
-    if (isValidHexColor(query.textColor)) {
-      params.textColor = query.textColor;
-    } else {
-      errors.push("Invalid textColor format (use hex: #FFFFFF)");
-    }
-  }
-
-  // Optional: dimensions
-  params.width = parseInt(query.width) || 1200;
-  params.height = parseInt(query.height) || 630;
-
-  if (params.width < 200 || params.width > 4000) {
-    errors.push("Width must be between 200 and 4000");
-  }
-  if (params.height < 200 || params.height > 4000) {
-    errors.push("Height must be between 200 and 4000");
-  }
-
-  // Optional: fontSize
-  if (query.fontSize) {
-    params.fontSize = parseInt(query.fontSize);
-    if (params.fontSize < 12 || params.fontSize > 200) {
-      errors.push("fontSize must be between 12 and 200");
-    }
-  }
-
-  // Optional: fontWeight
-  const validWeights = ["300", "400", "500", "600", "700", "800", "900"];
-  if (query.fontWeight && validWeights.includes(query.fontWeight)) {
-    params.fontWeight = query.fontWeight;
-  }
-
-  // Optional: layout
-  if (query.layout && LAYOUTS[query.layout]) {
-    params.layout = query.layout;
-  }
-
-  // Optional: padding
-  if (query.padding) {
-    params.padding = parseInt(query.padding);
-    if (params.padding < 0 || params.padding > 300) {
-      errors.push("padding must be between 0 and 300");
-    }
-  }
-
-  return { params, errors };
-}
+// Initialize services
+const translationService = new TranslationService(
+  process.env.LINGODOTDEV_API_KEY,
+);
+const svgGenerator = new SvgGenerator();
+const cache = new CacheManager();
+const rateLimiter = new RateLimiter();
 
 /**
  * Main API endpoint: GET /api/cover
+ *
+ * Generates a customizable SVG cover image
  *
  * Query parameters:
  * - text (required): Main text to display
@@ -457,14 +60,13 @@ function validateParams(query) {
  * - fontSize (optional): Font size in pixels (default: auto-calculated)
  * - fontWeight (optional): Font weight 300-900 (default: '600')
  * - layout (optional): Layout type (default: 'center')
- *   Available: center, top, bottom, left, right, top-left, top-right, bottom-left, bottom-right, split
  * - padding (optional): Padding in pixels (default: 60)
  */
 app.get("/api/cover", async (req, res) => {
   const clientIp = req.ip || req.connection.remoteAddress;
 
-  // Rate limiting
-  if (!checkRateLimit(clientIp)) {
+  // Check rate limit
+  if (!rateLimiter.checkLimit(clientIp)) {
     return res.status(429).json({
       error: "Rate limit exceeded",
       message: "Too many requests. Please try again later.",
@@ -481,14 +83,15 @@ app.get("/api/cover", async (req, res) => {
     });
   }
 
-  const cacheKey = generateCacheKey(params);
+  // Generate cache key
+  const cacheKey = cache.generateKey(params);
 
   // Check cache
   if (cache.has(cacheKey)) {
-    const { svg, timestamp } = cache.get(cacheKey);
+    const { svg } = cache.get(cacheKey);
 
     if (NODE_ENV === "development") {
-      console.log(`Cache hit for: ${params.text.substring(0, 30)}...`);
+      console.log(`✓ Cache hit: ${params.text.substring(0, 30)}...`);
     }
 
     res.setHeader("Content-Type", "image/svg+xml");
@@ -499,28 +102,29 @@ app.get("/api/cover", async (req, res) => {
 
   try {
     // Translate text if needed
-    const translatedText = await translateText(params.text, params.lang);
+    const translatedText = await translationService.translate(
+      params.text,
+      params.lang,
+    );
     const translatedSubtitle = params.subtitle
-      ? await translateText(params.subtitle, params.lang)
+      ? await translationService.translate(params.subtitle, params.lang)
       : "";
 
     // Generate SVG
-    const svg = generateSvgCover({
+    const svg = svgGenerator.generate({
       ...params,
       text: translatedText,
       subtitle: translatedSubtitle,
     });
 
     // Store in cache
-    addToCache(cacheKey, {
+    cache.set(cacheKey, {
       svg,
       timestamp: new Date().toISOString(),
     });
 
     if (NODE_ENV === "development") {
-      console.log(
-        `Generated new cover for: ${params.text.substring(0, 30)}...`,
-      );
+      console.log(`✓ Generated: ${params.text.substring(0, 30)}...`);
     }
 
     res.setHeader("Content-Type", "image/svg+xml");
@@ -538,37 +142,55 @@ app.get("/api/cover", async (req, res) => {
 });
 
 /**
- * GET /api/layouts - List available layouts
+ * GET /api/layouts
+ *
+ * Returns list of available layout options
  */
 app.get("/api/layouts", (req, res) => {
   res.json({
     layouts: Object.keys(LAYOUTS),
     default: "center",
+    descriptions: {
+      center: "Text centered in the middle",
+      top: "Text at the top center",
+      bottom: "Text at the bottom center",
+      left: "Text on the left side",
+      right: "Text on the right side",
+      "top-left": "Text in the top-left corner",
+      "top-right": "Text in the top-right corner",
+      "bottom-left": "Text in the bottom-left corner",
+      "bottom-right": "Text in the bottom-right corner",
+      split: "Text centered with vertical divider",
+    },
   });
 });
 
 /**
- * Health check endpoint
+ * GET /health
+ *
+ * Health check endpoint for monitoring
  */
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     environment: NODE_ENV,
-    cacheSize: cache.size,
-    maxCacheSize: MAX_CACHE_SIZE,
+    cacheSize: cache.size(),
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
 });
 
 /**
- * Documentation endpoint
+ * GET /api/docs
+ *
+ * Returns API documentation in JSON format
  */
 app.get("/api/docs", (req, res) => {
   res.json({
     endpoint: "/api/cover",
     method: "GET",
-    description: "Generate customizable cover images",
+    description:
+      "Generate customizable cover images with multi-language support",
     parameters: {
       text: {
         type: "string",
@@ -584,7 +206,7 @@ app.get("/api/docs", (req, res) => {
         type: "string",
         required: false,
         default: "en",
-        description: "Language code for translation",
+        description: "Language code for translation (ISO 639-1)",
       },
       theme: {
         type: "string",
@@ -652,24 +274,29 @@ app.get("/api/docs", (req, res) => {
     examples: [
       "/api/cover?text=Hello%20World",
       "/api/cover?text=Hello%20World&theme=dark",
-      "/api/cover?text=Hello%20World&subtitle=A%20greeting&layout=top-left",
+      "/api/cover?text=Welcome&subtitle=To%20my%20website&layout=top-left",
       "/api/cover?text=Hello&bgColor=%23FF5733&textColor=%23FFFFFF&fontSize=72",
-      "/api/cover?text=Hello&layout=split&width=1920&height=1080",
+      "/api/cover?text=Product%20Launch&layout=split&width=1920&height=1080",
     ],
   });
 });
 
 /**
- * Root endpoint
+ * GET /
+ *
+ * Root endpoint with API information
  */
 app.get("/", (req, res) => {
   res.json({
     name: "Cover Image API",
     version: "2.0.0",
     status: "running",
-    documentation: "/api/docs",
-    layouts: "/api/layouts",
-    health: "/health",
+    endpoints: {
+      documentation: "/api/docs",
+      layouts: "/api/layouts",
+      health: "/health",
+      generate: "/api/cover",
+    },
   });
 });
 
@@ -685,7 +312,7 @@ app.use((req, res) => {
 });
 
 /**
- * Error handler
+ * Global error handler
  */
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
@@ -698,7 +325,7 @@ app.use((err, req, res, next) => {
 /**
  * Start the server
  */
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════╗
 ║         Cover Image API v2.0.0                         ║
@@ -710,12 +337,12 @@ app.listen(PORT, () => {
 ❤️  Health check:     http://localhost:${PORT}/health
 
 Environment: ${NODE_ENV}
-Cache size limit: ${MAX_CACHE_SIZE}
-Rate limit: ${RATE_LIMIT_MAX} requests per minute
   `);
 });
 
-// Graceful shutdown
+/**
+ * Graceful shutdown handler
+ */
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received: closing HTTP server");
   server.close(() => {

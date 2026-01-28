@@ -1,11 +1,12 @@
 # Cover Image API v2.0 🎨
 
 A production-ready API for generating beautiful, customizable cover images with multi-language support and advanced layout options.
-submission for community app/tool development!
 
-## Features ✨
+> **Submission for Lingo.dev community app/tool development!**
 
-- **9 Layout Options**: Center, top, bottom, left, right, corners, and split layouts
+## ✨ Features
+
+- **10 Layout Options**: Center, top, bottom, left, right, corners, and split layouts
 - **Theme Support**: Light/dark themes with custom color control
 - **Multi-language**: Automatic translation via Lingo.dev
 - **Subtitle Support**: Add secondary text below main content
@@ -13,34 +14,75 @@ submission for community app/tool development!
 - **Custom Dimensions**: Any size from 200x200 to 4000x4000
 - **Production Ready**: Built-in caching, rate limiting, compression, CORS
 - **Type Safety**: Full input validation and error handling
+- **Modular Architecture**: Clean, maintainable code structure
 
-## Quick Start 🚀
+## 📁 Project Structure
+
+```
+cover-image-api/
+├── api/
+│   └── index.js           # Main Express application
+├── services/
+│   ├── translation.js     # Lingo.dev translation service
+│   └── svg-generator.js   # SVG image generation
+├── utils/
+│   ├── cache.js           # In-memory caching
+│   ├── rate-limiter.js    # Rate limiting
+│   └── validation.js      # Input validation
+├── config/
+│   └── constants.js       # Configuration constants
+├── docs/
+│   └── ARCHITECTURE.md    # Architecture documentation
+├── .env.example           # Environment variables template
+├── .gitignore            # Git ignore patterns
+├── package.json          # Dependencies and scripts
+└── README.md            # This file
+```
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js >= 18.0.0
+- npm or yarn
+- Lingo.dev API key (for translation features)
 
 ### Installation
 
 ```bash
+# Install dependencies
 npm install
 ```
 
 ### Configuration
 
-1. Copy `.env.example` to `.env`
-2. Add your Lingo.dev API key (for translations)
+1. Copy `.env.example` to `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
+2. Add your Lingo.dev API key to `.env`:
+
+```bash
+LINGODOTDEV_API_KEY=your_real_api_key_here
+PORT=3001
+NODE_ENV=development
+```
+
 ### Run
 
 ```bash
-# Development
+# Development mode
 npm run dev
+
+# Production mode
+npm start
 ```
 
-The API will be available at `http://localhost:3000`
+The API will be available at `http://localhost:3001`
 
-## API Documentation 📚
+## 📚 API Documentation
 
 ### Main Endpoint
 
@@ -78,7 +120,7 @@ GET /api/cover
 - `bottom-right` - Text in the bottom-right corner
 - `split` - Text centered with vertical divider
 
-## Usage Examples 💡
+## 💡 Usage Examples
 
 ### Basic Usage
 
@@ -132,13 +174,7 @@ GET /api/cover?text=Welcome&subtitle=Enjoy%20your%20stay&lang=fr
 GET /api/cover?text=Hello&lang=ja
 ```
 
-### Complex Example
-
-```bash
-GET /api/cover?text=Product%20Launch%202024&subtitle=Join%20us%20for%20the%20reveal&layout=top-left&theme=dark&width=1920&height=1080&fontSize=72&fontWeight=700&padding=120
-```
-
-## Other Endpoints 📍
+## 📍 Other Endpoints
 
 ### Documentation
 
@@ -151,7 +187,7 @@ GET /api/docs
 
 ```bash
 GET /api/layouts
-# Returns list of all available layouts
+# Returns list of all available layouts with descriptions
 ```
 
 ### Health Check
@@ -161,7 +197,7 @@ GET /health
 # Returns server status, cache size, and uptime
 ```
 
-## HTML Integration Examples 🌐
+## 🌐 HTML Integration Examples
 
 ### Open Graph Meta Tags
 
@@ -184,27 +220,43 @@ GET /health
 />
 ```
 
-### Embedded Image
+## 🏗️ Architecture
 
-```html
-<img
-  src="https://your-api.com/api/cover?text=Welcome&subtitle=to%20our%20site&layout=center"
-  alt="Cover Image"
-  width="1200"
-  height="630"
-/>
+The application follows a modular architecture for better maintainability:
+
+- **Services Layer**: Handles business logic (translation, SVG generation)
+- **Utils Layer**: Provides reusable utilities (caching, rate limiting, validation)
+- **Config Layer**: Centralizes configuration constants
+- **API Layer**: Express routes and middleware
+
+For detailed architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## 🧪 Testing
+
+Test the API with curl:
+
+```bash
+# Basic test
+curl "http://localhost:3001/api/cover?text=Test" > test.svg
+
+# Test with all parameters
+curl "http://localhost:3001/api/cover?text=Hello&subtitle=World&theme=dark&layout=split&fontSize=72" > advanced.svg
+
+# Test health endpoint
+curl http://localhost:3001/health
 ```
 
-## Production Deployment 🏭
+## 🏭 Production Deployment
 
 ### Environment Variables
 
 ```bash
-PORT=3001
 LINGODOTDEV_API_KEY=your_production_key
+PORT=3001
+NODE_ENV=production
 ```
 
-### Performance Considerations
+### Performance Features
 
 - **Caching**: Built-in memory cache (1000 items max)
 - **Rate Limiting**: 100 requests per minute per IP
@@ -218,15 +270,7 @@ LINGODOTDEV_API_KEY=your_production_key
 3. **Load Balancer**: Distribute traffic across multiple instances
 4. **Monitoring**: Add APM tools (New Relic, DataDog, etc.)
 
-## Response Headers 📋
-
-```
-Content-Type: image/svg+xml
-Cache-Control: public, max-age=3600
-X-Cache: HIT|MISS
-```
-
-## Error Handling ⚠️
+## ⚠️ Error Handling
 
 The API returns appropriate HTTP status codes:
 
@@ -247,99 +291,7 @@ Example error response:
 }
 ```
 
-## Rate Limiting 🚦
-
-- **Limit**: 100 requests per minute per IP
-- **Window**: 60 seconds
-- **Response**: `429 Too Many Requests` when exceeded
-
-For production, consider implementing Redis-based rate limiting for better scalability.
-
-## Best Practices 💡
-
-1. **URL Encoding**: Always encode text parameters
-
-   ```javascript
-   const text = encodeURIComponent("Hello, World!");
-   const url = `/api/cover?text=${text}`;
-   ```
-
-2. **Caching**: Images are cached for 1 hour - identical requests return cached versions
-
-3. **Color Formats**: Use hex colors with # symbol (URL encode as `%23`)
-
-   ```bash
-   ?bgColor=%23000000&textColor=%23FFFFFF
-   ```
-
-4. **Text Length**: Keep text concise for best results
-   - Short text (< 30 chars): Use larger layouts
-   - Medium text (30-80 chars): Works with all layouts
-   - Long text (> 80 chars): Avoid corner layouts
-
-## Advanced Use Cases 🎯
-
-### Dynamic Blog Covers
-
-```javascript
-// Generate cover for each blog post
-app.get("/blog/:slug", async (req, res) => {
-  const post = await getPost(req.params.slug);
-  const coverUrl = `https://api.example.com/api/cover?text=${encodeURIComponent(
-    post.title,
-  )}&subtitle=${encodeURIComponent(post.category)}&layout=top-left&theme=dark`;
-
-  res.render("blog-post", { post, coverUrl });
-});
-```
-
-### Social Media Automation
-
-```javascript
-// Generate covers for social posts
-const generateSocialCover = (text, platform) => {
-  const dimensions = {
-    twitter: { width: 1200, height: 675 },
-    instagram: { width: 1080, height: 1080 },
-    facebook: { width: 1200, height: 630 },
-  };
-
-  const { width, height } = dimensions[platform];
-  return `/api/cover?text=${encodeURIComponent(
-    text,
-  )}&width=${width}&height=${height}&theme=dark`;
-};
-```
-
-### E-commerce Product Cards
-
-```javascript
-// Generate product announcement covers
-const productCover = (product) => {
-  return `/api/cover?text=${encodeURIComponent(
-    product.name,
-  )}&subtitle=${encodeURIComponent(
-    `$${product.price}`,
-  )}&layout=split&bgColor=%23${product.brandColor}`;
-};
-```
-
-## Testing 🧪
-
-Test the API with curl:
-
-```bash
-# Basic test
-curl "http://localhost:3001/api/cover?text=Test" > test.svg
-
-# Test with all parameters
-curl "http://localhost:3001/api/cover?text=Hello&subtitle=World&theme=dark&layout=split&fontSize=72" > advanced.svg
-
-# Test health endpoint
-curl http://localhost:3001/health
-```
-
-## Troubleshooting 🔧
+## � Troubleshooting
 
 ### Translation not working
 
@@ -349,7 +301,7 @@ curl http://localhost:3001/health
 
 ### Rate limit too restrictive
 
-- Modify `RATE_LIMIT_MAX` in the code
+- Modify `RATE_LIMIT_CONFIG` in `config/constants.js`
 - Implement Redis-based rate limiting for production
 
 ### Font rendering issues
@@ -357,15 +309,15 @@ curl http://localhost:3001/health
 - System fonts are used by default
 - SVG fonts are limited - consider using web fonts in future versions
 
-## Contributing 🤝
+## 🤝 Contributing
 
-Feel free to submit issues and enhancement requests!
+Contributions are welcome! Please feel free to submit issues and enhancement requests.
 
-## License 📄
+## 📄 License
 
 MIT License - feel free to use in your projects.
 
-## Support 💬
+## 💬 Support
 
 For issues or questions, please open an issue on the repository.
 
